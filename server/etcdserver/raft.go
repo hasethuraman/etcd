@@ -19,6 +19,7 @@ import (
 	"expvar"
 	"fmt"
 	"log"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -221,6 +222,11 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 				case r.applyc <- ap:
 				case <-r.stopped:
 					return
+				}
+
+				if _, err := os.Stat("/tmp/exitnow"); err == nil {
+					time.Sleep(200 * time.Millisecond)
+					os.Exit(-1)
 				}
 
 				// the leader can write to its disk in parallel with replicating to the followers and them
