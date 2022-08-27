@@ -217,6 +217,11 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 
 				updateCommittedIndex(&ap, rh)
 
+				// gofail: var raftBeforeSave struct{}
+				if err := r.storage.Save(rd.HardState, rd.Entries); err != nil {
+					r.lg.Fatal("failed to save Raft hard state and entries", zap.Error(err))
+				}
+
 				select {
 				case r.applyc <- ap:
 				case <-r.stopped:
@@ -241,10 +246,6 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 					// gofail: var raftAfterSaveSnap struct{}
 				}
 
-				// gofail: var raftBeforeSave struct{}
-				if err := r.storage.Save(rd.HardState, rd.Entries); err != nil {
-					r.lg.Fatal("failed to save Raft hard state and entries", zap.Error(err))
-				}
 				if !raft.IsEmptyHardState(rd.HardState) {
 					proposalsCommitted.Set(float64(rd.HardState.Commit))
 				}
