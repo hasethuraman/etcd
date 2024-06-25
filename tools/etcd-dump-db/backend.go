@@ -52,6 +52,7 @@ func getBuckets(dbPath string) (buckets []string, err error) {
 // TODO: import directly from packages, rather than copy&paste
 
 type decoder func(k, v []byte)
+type decoder_get func(k, v []byte) (revision, string, string, int64)
 
 var decoders = map[string]decoder{
 	"key":       keyDecoder,
@@ -59,6 +60,14 @@ var decoders = map[string]decoder{
 	"auth":      authDecoder,
 	"authRoles": authRolesDecoder,
 	"authUsers": authUsersDecoder,
+}
+
+var decoders_get = map[string]decoder_get{
+	"key": keyDecoderReturn,
+	// "lease":     leaseDecoder,
+	// "auth":      authDecoder,
+	// "authRoles": authRolesDecoder,
+	// "authUsers": authUsersDecoder,
 }
 
 type revision struct {
@@ -80,6 +89,15 @@ func keyDecoder(k, v []byte) {
 		panic(err)
 	}
 	fmt.Printf("rev=%+v, value=[key %q | val %q | created %d | mod %d | ver %d]\n", rev, string(kv.Key), string(kv.Value), kv.CreateRevision, kv.ModRevision, kv.Version)
+}
+
+func keyDecoderReturn(k, v []byte) (revision, string, string, int64) {
+	rev := bytesToRev(k)
+	var kv mvccpb.KeyValue
+	if err := kv.Unmarshal(v); err != nil {
+		panic(err)
+	}
+	return rev, string(kv.Key), string(kv.Value), kv.Version
 }
 
 func bytesToLeaseID(bytes []byte) int64 {

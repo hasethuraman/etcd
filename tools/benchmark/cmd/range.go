@@ -15,10 +15,14 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 
 	v3 "go.etcd.io/etcd/client/v3"
@@ -57,6 +61,24 @@ func rangeFunc(cmd *cobra.Command, args []string) {
 	}
 
 	k := args[0]
+	var scanner *bufio.Scanner
+	if _, err := os.Stat(k); err == nil {
+		fn, err := os.OpenFile(k, os.O_RDONLY, 0666)
+		if err != nil {
+			fmt.Printf("Error while opening file to read keys: %s", err.Error())
+			os.Exit(1)
+		}
+		scanner = bufio.NewScanner(fn)
+		defer fn.Close()
+		cmd := exec.Command("wc", "-l", k)
+		stdout, err := cmd.Output()
+		if err != nil {
+			fmt.Printf("Error while checking file for keys length: %s", err.Error())
+			os.Exit(1)
+		}
+		rangeTotal, _ = strconv.Atoi(strings.Split(strings.Split(string(stdout), "\n")[0], " ")[0])
+	}
+
 	end := ""
 	if len(args) == 2 {
 		end = args[1]
@@ -93,6 +115,9 @@ func rangeFunc(cmd *cobra.Command, args []string) {
 
 				st := time.Now()
 				_, err := c.Do(context.Background(), op)
+				// for _, kv := range resp.Get().Kvs {
+				// 	fmt.Printf("Key: %s, Value: %s \n", kv.Key, kv.Value)
+				// }
 				r.Results() <- report.Result{Err: err, Start: st, End: time.Now()}
 				bar.Increment()
 			}
@@ -100,13 +125,24 @@ func rangeFunc(cmd *cobra.Command, args []string) {
 	}
 
 	go func() {
-		for i := 0; i < rangeTotal; i++ {
-			opts := []v3.OpOption{v3.WithRange(end)}
-			if rangeConsistency == "s" {
-				opts = append(opts, v3.WithSerializable())
+		if scanner != nil {
+			for scanner.Scan() {
+				opts := []v3.OpOption{v3.WithRange(end)}
+				if rangeConsistency == "s" {
+					opts = append(opts, v3.WithSerializable())
+				}
+				op := v3.OpGet(scanner.Text(), opts...)
+				requests <- op
 			}
-			op := v3.OpGet(k, opts...)
-			requests <- op
+		} else {
+			for i := 0; i < rangeTotal; i++ {
+				opts := []v3.OpOption{v3.WithRange(end)}
+				if rangeConsistency == "s" {
+					opts = append(opts, v3.WithSerializable())
+				}
+				op := v3.OpGet(k, opts...)
+				requests <- op
+			}
 		}
 		close(requests)
 	}()

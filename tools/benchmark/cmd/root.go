@@ -54,6 +54,9 @@ var (
 	dialTimeout time.Duration
 
 	targetLeader bool
+
+	maxCallSendMsgSize int
+	maxCallRxMsgSize   int
 )
 
 func init() {
@@ -71,4 +74,6 @@ func init() {
 	RootCmd.PersistentFlags().DurationVar(&dialTimeout, "dial-timeout", 0, "dial timeout for client connections")
 
 	RootCmd.PersistentFlags().BoolVar(&targetLeader, "target-leader", false, "connect only to the leader node")
+	RootCmd.PersistentFlags().IntVar(&maxCallSendMsgSize, "maxCallSendMsgSize", 3145728, "maximum size of the message that can be sent")
+	RootCmd.PersistentFlags().IntVar(&maxCallRxMsgSize, "maxCallRxMsgSize", 3145728, "maximum size of the message that can be received")
 }

@@ -17,7 +17,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -61,12 +60,12 @@ func init() {
 	rootCommand.AddCommand(getHashCommand)
 }
 
-func main() {
-	if err := rootCommand.Execute(); err != nil {
-		fmt.Fprintln(os.Stdout, err)
-		os.Exit(1)
-	}
-}
+// func main() {
+// 	if err := rootCommand.Execute(); err != nil {
+// 		fmt.Fprintln(os.Stdout, err)
+// 		os.Exit(1)
+// 	}
+// }
 
 func listBucketCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
