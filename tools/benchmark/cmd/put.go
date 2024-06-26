@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -35,6 +36,111 @@ import (
 	"gopkg.in/cheggaaa/pb.v1"
 )
 
+type NodeSpec struct {
+	Id            string            `json:"id"`
+	Endpoint      string            `json:"endpoint"`
+	Labels        map[string]string `json:"labels"`
+	Cordon_labels []string          `json:"cordon_labels"`
+}
+
+type PoolSpec struct {
+	Node          string            `json:"node"`
+	Id            string            `json:"id"`
+	Disks         []string          `json:"disks"`
+	Status        map[string]string `json:"status"`
+	Labels        map[string]string `json:"labels"`
+	Cordon_labels []string          `json:"cordon_labels"`
+	Operation     *string           `json:"operation"`
+	PoolType      string            `json:"pooltype"`
+	Revision      int               `json:"revision"`
+}
+
+type VolumeSpec struct {
+	Uuid          string                                             `json:"uuid"`
+	Size          int64                                              `json:"size"`
+	Labels        map[string]string                                  `json:"labels"`
+	Num_replicas  int                                                `json:"num_replicas"`
+	Status        map[string]string                                  `json:"status"`
+	Target        map[string]string                                  `json:"target"`
+	Policy        map[string]string                                  `json:"policy"`
+	Topology      map[string]map[string]map[string]map[string]string `json:"topology"`
+	Last_nexus_id string                                             `json:"last_nexus_id"`
+	Operation     *string                                            `json:"operation"`
+	Thin          bool                                               `json:"thin"`
+	Revision      int                                                `json:"revision"`
+}
+
+type ReplicaSpec struct {
+	Name      string            `json:"name"`
+	Uuid      string            `json:"uuid"`
+	Size      int64             `json:"size"`
+	Pool      string            `json:"pool"`
+	Share     string            `json:"share"`
+	Thin      bool              `json:"thin"`
+	Status    map[string]string `json:"status"`
+	Managed   bool              `json:"managed"`
+	Owners    map[string]string `json:"owners"`
+	Operation *string           `json:"operation"`
+	Revision  int               `json:"revision"`
+}
+
+type NexusChild struct {
+	Replica Replica `json:"Replica"`
+}
+
+type Replica struct {
+	Uuid      string `json:"uuid"`
+	Share_uri string `json:"share_uri"`
+}
+
+type NexusSpec struct {
+	Uuid          string            `json:"uuid"`
+	Name          string            `json:"name"`
+	Node          string            `json:"node"`
+	Children      []NexusChild      `json:"children"`
+	Size          int64             `json:"size"`
+	Spec_status   map[string]string `json:"spec_status"`
+	Share         string            `json:"share"`
+	Managed       bool              `json:"managed"`
+	Owner         string            `json:"owner"`
+	Operation     *string           `json:"operation"`
+	Revision      int               `json:"revision"`
+	Last_snapshot string            `json:"last_snapshot"`
+}
+
+type VolumeNexusChildInfo struct {
+	Healthy     bool   `json:"healthy"`
+	Uuid        string `json:"uuid"`
+	Rebuild_map []byte `json:"rebuild_map"`
+}
+
+type VolumeNexusInfo struct {
+	Children       []VolumeNexusChildInfo `json:"children"`
+	Clean_shutdown bool                   `json:"clean_shutdown"`
+}
+
+type VolumeSnapshotSpec struct {
+	Name               string            `json:"name"`
+	Volume_id          string            `json:"volume_id"`
+	Nexus_id           string            `json:"nexus_id"`
+	Creation_timestamp string            `json:"creation_timestamp"`
+	Status             map[string]string `json:"status"`
+	Operation          *string           `json:"operation"`
+	Revision           int               `json:"revision"`
+}
+
+type ReplicaSnapshotSpec struct {
+	Name          string            `json:"name"`
+	Uuid          string            `json:"uuid"`
+	Snapshot_name string            `json:"snapshot_name"`
+	Source_id     string            `json:"source_id"`
+	Pool_id       string            `json:"pool_id"`
+	Owner         map[string]string `json:"owner"`
+	Status        map[string]string `json:"status"`
+	Operation     *string           `json:"operation"`
+	Revision      int               `json:"revision"`
+}
+
 // putCmd represents the put command
 var putCmd = &cobra.Command{
 	Use:   "put",
@@ -45,7 +151,7 @@ var putCmd = &cobra.Command{
 
 type kv struct {
 	key   string
-	value string
+	value []byte
 }
 
 var (
@@ -122,16 +228,11 @@ func generateRandomString(length int) string {
 	return result
 }
 
-func generateRandomStringWith0s1s(length int) string {
-	const charset = "01"
-	var result string
-	rand.Seed(time.Now().UnixNano())
-
-	for i := 0; i < length; i++ {
-		randomIndex := rand.Intn(len(charset))
-		result += string(charset[randomIndex])
+func createArrayWithSameValue[T any](length int, value T) []T {
+	result := make([]T, length/8)
+	for i := range result {
+		result[i] = value
 	}
-
 	return result
 }
 
@@ -141,11 +242,20 @@ func populate_kvs(clusterid string) {
 	kvs := []kv{}
 	for i := 0; i < msnodes; i++ {
 		k1 := fmt.Sprintf(clusterid+"/namespaces/default/NodeSpec/k8s-agentpool1-10232180-vmss00%05d", i)
-		v1 := fmt.Sprintf(
-			"{\"id\":\"k8s-agentpool1-10232180-vmss00%05d\",\"endpoint\":\"%s:10124\",\"labels\":{\"topology.kubernetestorage.csi.mayastor.com/zone\":\"\"},\"cordon_labels\":[]",
-			i,
-			generateRandomIP(),
+		v1, err := json.Marshal(
+			NodeSpec{
+				Id:       fmt.Sprintf("k8s-agentpool1-10232180-%05d", i),
+				Endpoint: fmt.Sprintf("%s:10124", generateRandomIP()),
+				Labels: map[string]string{
+					"topology.kubernetestorage.csi.mayastor.com/zone": "",
+				},
+				Cordon_labels: []string{},
+			},
 		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to marshal node spec: %v\n", err)
+			os.Exit(1)
+		}
 		kvs = append(kvs, kv{key: k1, value: v1})
 	}
 	if len(kvs) > 0 {
@@ -160,17 +270,36 @@ func populate_kvs(clusterid string) {
 		}
 		agentpoold := fmt.Sprintf("k8s-agentpool1-10232180-%d", cn)
 		k1 := clusterid + "/namespaces/default/PoolSpec/csi-" + generateRandomString(5)
-		v1 := fmt.Sprintf(
-			"{\"node\":\"%s\",\"id\":\"csi-abcde\",\"disks\":[\"/abc/dis\"],\"status\":{\"Created\":\"Online\"},\"labels\":{\"default.cloud.org/storagedisk\":\"testdiskpoolfromcloud-request-xyz\",\"default.cloud.org/provisionedby\":\"someone-by-administring\",\"default.cloud.org/somepool\":\"testdiskpoolfromcloud-request-xyz-diskpool-abcde\",\"default.cloud.org/plumber\":\"somediskpool-provisioned-24gdd\",\"openebs.io/created-by\":\"operator-diskpool\",\"default.cloud.org/type-of-disk\":\"generallycloud\"},\"operation\":null,\"pooltype\":\"any\",\"revision\":300}",
-			agentpoold,
+		v1, err := json.Marshal(
+			PoolSpec{
+				Node:   agentpoold,
+				Id:     "csi-abcde",
+				Disks:  []string{"/abc/dis"},
+				Status: map[string]string{"Created": "Online"},
+				Labels: map[string]string{
+					"default.cloud.org/storagedisk":   "testdiskpoolfromcloud-request-xyz",
+					"default.cloud.org/provisionedby": "someone-by-administring",
+					"default.cloud.org/somepool":      "testdiskpoolfromcloud-request-xyz-diskpool-abcde",
+					"default.cloud.org/plumber":       "somediskpool-provisioned-24gdd",
+					"openebs.io/created-by":           "operator-diskpool",
+					"default.cloud.org/type-of-disk":  "generallycloud",
+				},
+				Operation: nil,
+				PoolType:  "any",
+				Revision:  300,
+			},
 		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to marshal node spec: %v\n", err)
+			os.Exit(1)
+		}
 		kvs = append(kvs, kv{key: k1, value: v1})
 	}
 	if len(kvs) > 0 {
 		q <- kvs
 	}
 
-	rebuild_map_str := generateRandomStringWith0s1s(noofsegs)
+	rebuild_map_byte_array := createArrayWithSameValue(noofsegs, uint8(255))
 	rebuild_count := noofrebuilds
 	snap_count := noofsnaps
 
@@ -186,10 +315,30 @@ func populate_kvs(clusterid string) {
 		volid := uuid.New().String()
 
 		k1 := clusterid + "/namespaces/default/VolumeSpec/" + volid
-		v1 := fmt.Sprintf(
-			"{\"uuid\":\"%s\",\"size\":2147483648,\"labels\":null,\"num_replicas\":1,\"status\":{\"Created\":\"Online\"},\"target\":{\"node\":\"%s\",\"nexus\":\"%s\",\"protocol\":\"nvmf\"},\"policy\":{\"self_heal\":true},\"topology\":{\"node\":null,\"pool\":{\"Labelled\":{\"exclusion\":{},\"inclusion\":{\"openebs.io/created-by\":\"operator-diskpool\"}}}},\"last_nexus_id\":\"%s\",\"operation\":null,\"thin\":false}",
-			volid, agentpoold, nexid, nexid,
-		)
+		v1, err := json.Marshal(VolumeSpec{
+			Uuid:         volid,
+			Size:         2147483648,
+			Labels:       nil,
+			Num_replicas: 1,
+			Status:       map[string]string{"Created": "Online"},
+			Target:       map[string]string{"node": agentpoold, "nexus": nexid, "protocol": "nvmf"},
+			Policy:       map[string]string{"self_heal": "true"},
+			Topology: map[string]map[string]map[string]map[string]string{
+				"node": nil,
+				"pool": {
+					"Labelled": {
+						"exclusion": nil,
+						"inclusion": {"openebs.io/created-by": "operator-diskpool"},
+					},
+				},
+			},
+			Last_nexus_id: nexid,
+			Operation:     nil,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to marshal volume spec: %v\n", err)
+			os.Exit(1)
+		}
 		kvs := []kv{}
 		kv1 := kv{}
 		kv1.key = k1
@@ -201,10 +350,24 @@ func populate_kvs(clusterid string) {
 			replid := uuid.New().String()
 			replids = append(replids, replid)
 			k2 := clusterid + "/namespaces/default/ReplicaSpec/" + replid
-			v2 := fmt.Sprintf(
-				"{\"name\":\"%s\",\"uuid\":\"%s\",\"size\":2147483648,\"pool\":\"diskpool-ppndp\",\"share\":\"none\",\"thin\":false,\"status\":{\"Created\":\"online\"},\"managed\":true,\"owners\":{\"volume\":\"%s\"},\"operation\":null}",
-				replid, replid, volid,
+			v2, err := json.Marshal(
+				ReplicaSpec{
+					Name:      replid,
+					Uuid:      replid,
+					Size:      2147483648,
+					Pool:      "diskpool-ppndp",
+					Share:     "none",
+					Thin:      false,
+					Status:    map[string]string{"Created": "online"},
+					Managed:   true,
+					Owners:    map[string]string{"volume": volid},
+					Operation: nil,
+				},
 			)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to marshal replica spec: %v\n", err)
+				os.Exit(1)
+			}
 
 			kv2 := kv{}
 			kv2.key = k2
@@ -217,33 +380,55 @@ func populate_kvs(clusterid string) {
 			rebuild_count = rebuild_count - 1
 		}
 		if rebuild_count == 0 {
-			rebuild_map_str = ""
+			rebuild_map_byte_array = nil
 		}
 		k3 := clusterid + "/namespaces/default/NexusSpec/" + nexid
 		k4 := clusterid + "/namespaces/default/volume/" + volid + "/nexus/" + nexid + "/info"
-		n_child_str := ""
-		child_str := ""
-		l_rebuild_str := rebuild_map_str
-		for _, replid := range replids {
-			n_child_str = n_child_str + fmt.Sprintf("{\"Replica\":{\"uuid\":\"%s\",\"share_uri\":\"nvmf://10.1.0.5:8420/nqn.2019-05.io.openebs:/xfs-disk-pool/loopxyz2023070702/%s?uuid=%s\"}},", replid, replid, replid)
-			child_str = child_str + fmt.Sprintf("{\"healthy\":true,\"uuid\":\"%s\",\"rebuild_map\":%s},", replid, l_rebuild_str)
-			l_rebuild_str = ""
+		nexus := NexusSpec{
+			Uuid:     nexid,
+			Name:     volid,
+			Node:     agentpoold,
+			Children: nil,
+			Size:     2147483648,
+			Spec_status: map[string]string{
+				"Created": "Online",
+			},
+			Share:     "nvmf",
+			Managed:   true,
+			Owner:     volid,
+			Operation: nil,
+			Revision:  0,
 		}
-		v3 := fmt.Sprintf(
-			"{\"uuid\":\"%s\",\"name\":\"%s\",\"node\":\"%s\",\"children\":[%s],\"size\":2147483648,\"spec_status\":{\"Created\":\"Online\"},\"share\":\"nvmf\",\"managed\":true,\"owner\":\"%s\",\"operation\":null}",
-			nexid, volid, agentpoold, n_child_str, volid,
-		)
-		v4 := fmt.Sprintf(
-			"{\"children\":[%s],\"clean_shutdown\":false}",
-			child_str,
-		)
+		vol_nexus := VolumeNexusInfo{
+			Children:       nil,
+			Clean_shutdown: false,
+		}
+		var nexus_children []NexusChild
+		var vol_nexus_children []VolumeNexusChildInfo
+		l_rebuild_byte_array := rebuild_map_byte_array
+		for _, replid := range replids {
+			nexus_children = append(nexus_children, NexusChild{Replica{Uuid: replid, Share_uri: fmt.Sprintf("nvmf://10.1.0.5:8420/nqn.2019-05.io.openebs:/xfs-disk-pool/loopxyz2023070702/%s?uuid=%s", replid, replid)}})
+			vol_nexus_children = append(vol_nexus_children, VolumeNexusChildInfo{Healthy: true, Uuid: replid, Rebuild_map: l_rebuild_byte_array})
+			l_rebuild_byte_array = nil
+		}
+		nexus.Children = nexus_children
+		vol_nexus.Children = vol_nexus_children
+
 		kv3 := kv{}
 		kv3.key = k3
-		kv3.value = v3
+		kv3.value, err = json.Marshal(nexus)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to marshal nexus spec: %v\n", err)
+			os.Exit(1)
+		}
 
 		kv4 := kv{}
 		kv4.key = k4
-		kv4.value = v4
+		kv4.value, err = json.Marshal(vol_nexus)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to marshal vol nexus spec: %v\n", err)
+			os.Exit(1)
+		}
 
 		kvs = append(kvs, kv3)
 		kvs = append(kvs, kv4)
@@ -255,12 +440,21 @@ func populate_kvs(clusterid string) {
 		if mssnaps > 0 {
 			snapid := uuid.New().String()
 			k5 := clusterid + "/namespaces/default/VolumeSnapshotSpec/" + volid + "@snapshot-" + snapid
-			v5 := fmt.Sprintf(
-				"{\"name\":\"%s\",\"volume_id\":\"%s\",\"nexus_id\":\"%s\",\"creation_timestamp\":\"2024-06-24T11:50:02.516046460Z\",\"status\":{\"Created\":null},\"operation\":null,\"revision\":200}",
-				volid+"@snapshot-"+snapid,
-				volid,
-				nexid,
+			v5, err := json.Marshal(
+				VolumeSnapshotSpec{
+					Name:               volid + "@snapshot-" + snapid,
+					Volume_id:          volid,
+					Nexus_id:           nexid,
+					Creation_timestamp: "2024-06-24T11:50:02.516046460Z",
+					Status:             map[string]string{"Created": "null"},
+					Operation:          nil,
+					Revision:           200,
+				},
 			)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to marshal volume snapshot spec: %v\n", err)
+				os.Exit(1)
+			}
 			kv5 := kv{}
 			kv5.key = k5
 			kv5.value = v5
@@ -270,14 +464,23 @@ func populate_kvs(clusterid string) {
 				repid := uuid.New().String()
 				repname := uuid.New().String()
 				k6 := clusterid + "/namespaces/default/ReplicaSnapshotSpec/" + repid
-				v6 := fmt.Sprintf(
-					"{\"name\":\"%s\",\"uuid\":\"%s\",\"snapshot_name\":\"%s\",\"source_id\":\"%s\",\"pool_id\":\"local-gll2d\",\"owner\":{\"volume_snapshot\":\"%s\"},\"status\":{\"Created\":null},\"operation\":null,\"revision\":200}",
-					repname+"@snapshot-"+snapid,
-					repid,
-					volid+"@snapshot-"+snapid,
-					repname,
-					volid+"@snapshot-"+snapid,
+				v6, err := json.Marshal(
+					ReplicaSnapshotSpec{
+						Name:          repname + "@snapshot-" + snapid,
+						Uuid:          repid,
+						Snapshot_name: volid + "@snapshot-" + snapid,
+						Source_id:     repname,
+						Pool_id:       volid + "@snapshot-" + snapid,
+						Owner:         map[string]string{"volume_snapshot": volid + "@snapshot-" + snapid},
+						Status:        map[string]string{"Created": "null"},
+						Operation:     nil,
+						Revision:      200,
+					},
 				)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "failed to marshal replica snapshot spec: %v\n", err)
+					os.Exit(1)
+				}
 
 				kv6 := kv{}
 				kv6.key = k6
@@ -387,7 +590,7 @@ func putFunc(cmd *cobra.Command, args []string) {
 							os.Exit(1)
 						}
 					}
-					requests <- v3.OpPut(kv.key, kv.value)
+					requests <- v3.OpPut(kv.key, string(kv.value))
 				}
 			}
 			close(requests)
